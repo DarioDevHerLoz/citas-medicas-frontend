@@ -3,6 +3,7 @@ import IndexPage from './views/IndexPage'
 import LoginPage from './views/LoginPage'
 import RegisterPage from './views/RegisterPage'
 import PacienteDashboard from './views/DasboardPacientePage'
+import MedicoDashboard from './views/DashboardDoctorPage'
 
 
 export default function AppRouter() {
@@ -25,6 +26,11 @@ export default function AppRouter() {
                 path='/paciente' 
                 element={<PacienteDashboard/>}
             />
+            <Route 
+                path='/medico' 
+                element={<MedicoDashboard/>}
+            />
+            
         </Routes>
     </BrowserRouter>
   )
