@@ -2,6 +2,7 @@ import {BrowserRouter, Routes, Route} from 'react-router-dom'
 import IndexPage from './views/IndexPage'
 import LoginPage from './views/LoginPage'
 import RegisterPage from './views/RegisterPage'
+import PacienteDashboard from './views/DasboardPacientePage'
 
 
 export default function AppRouter() {
@@ -19,6 +20,10 @@ export default function AppRouter() {
             <Route 
                 path='/register' 
                 element={<RegisterPage/>}
+            />
+            <Route 
+                path='/paciente' 
+                element={<PacienteDashboard/>}
             />
         </Routes>
     </BrowserRouter>
