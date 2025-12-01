@@ -1,122 +1,184 @@
 import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 export default function RegisterPage() {
-  const [rol, setRol] = useState("");
+  const navigate = useNavigate();
+
+  const [rol, setRol] = useState<string>("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string>("");
+
+  const [form, setForm] = useState({
+    nombre: "",
+    apaterno: "",
+    amaterno: "",
+    direccion: "",
+    telefono: "",
+    ciudad: "",
+    estado: "",
+    rol: "",
+    cedula: "",
+    correo: "",
+    password: "",
+  });
+
+  // Manejar inputs de manera dinámica
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    setForm({ ...form, [name]: value });
+
+    if (name === "rol") setRol(value);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+
+    try {
+      const res = await fetch("http://localhost:5005/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error || "Error al registrar");
+        setLoading(false);
+        return;
+      }
+
+      // Registro correcto
+      console.log("Usuario creado:", data);
+
+      // Redirigir al login
+      navigate("/login");
+
+    } catch (err) {
+      setError("Error de conexión con el servidor", err);
+    }
+
+    setLoading(false);
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-100 to-blue-300 p-4">
 
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-xl p-8">
+      <div className="w-full max-w-lg bg-white rounded-2xl shadow-xl p-8">
         <h1 className="text-3xl font-bold text-center text-blue-700 mb-6">
-          Registro de Usuario
+          Crear Cuenta
         </h1>
 
-        <form className="space-y-5">
+        {error && (
+          <div className="p-2 text-red-600 text-center font-semibold">{error}</div>
+        )}
 
-          {/* Nombres */}
+        <form className="space-y-5" onSubmit={handleSubmit}>
+
+          {/* INPUTS DINÁMICOS */}
+          {[
+            { label: "Nombre", name: "nombre" },
+            { label: "Apellido paterno", name: "apaterno" },
+            { label: "Apellido materno", name: "amaterno" },
+            { label: "Dirección", name: "direccion" },
+            { label: "Teléfono", name: "telefono" },
+            { label: "Ciudad", name: "ciudad" },
+            { label: "Estado", name: "estado" },
+          ].map((item) => (
+            <div key={item.name}>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                {item.label}
+              </label>
+              <input
+                name={item.name}
+                type="text"
+                value={(form as any)[item.name]}
+                onChange={handleChange}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+              />
+            </div>
+          ))}
+
+          {/* ROL */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Nombres
+              Rol
             </label>
-            <input
-              type="text"
-              placeholder="Juan Carlos"
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-            />
+            <select
+              name="rol"
+              value={form.rol}
+              onChange={handleChange}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+            >
+              <option value="">Selecciona un rol</option>
+              <option value="paciente">Paciente</option>
+              <option value="medico">Médico</option>
+              <option value="admin">Administrador</option>
+            </select>
           </div>
 
-          {/* Apellido Paterno */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Apellido Paterno
-            </label>
-            <input
-              type="text"
-              placeholder="Gómez"
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-            />
-          </div>
+          {/* CÉDULA SOLO SI ES MÉDICO */}
+          {rol === "medico" && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Cédula profesional
+              </label>
+              <input
+                name="cedula"
+                type="text"
+                value={form.cedula}
+                onChange={handleChange}
+                placeholder="Número de cédula"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+              />
+            </div>
+          )}
 
-          {/* Apellido Materno */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Apellido Materno
-            </label>
-            <input
-              type="text"
-              placeholder="Ramírez"
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-            />
-          </div>
-
-          {/* Email */}
+          {/* CORREO */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Correo electrónico
             </label>
             <input
+              name="correo"
               type="email"
-              placeholder="correo@ejemplo.com"
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+              value={form.correo}
+              onChange={handleChange}
+              placeholder="correo@correo.com"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg"
             />
           </div>
 
-          {/* Contraseña */}
+          {/* PASSWORD */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Contraseña
             </label>
             <input
+              name="password"
               type="password"
+              value={form.password}
+              onChange={handleChange}
               placeholder="********"
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg"
             />
           </div>
 
-          {/* Rol */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Rol
-            </label>
-
-            <select
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none"
-              value={rol}
-              onChange={(e) => setRol(e.target.value)}
-            >
-              <option value="">Seleccione un rol</option>
-              <option value="administrador">Administrador</option>
-              <option value="medico">Médico</option>
-              <option value="paciente">Paciente</option>
-            </select>
-          </div>
-
-          {/* Campo especial SOLO si es médico */}
-          {rol === "medico" && (
-            <div className="animate-fadeIn">
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Número de Cédula Profesional
-              </label>
-              <input
-                type="text"
-                placeholder="1234567"
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-              />
-            </div>
-          )}
-
-          {/* Submit */}
+          {/* BOTÓN */}
           <button
             type="submit"
+            disabled={loading}
             className="w-full bg-blue-600 text-white font-semibold py-2 rounded-lg hover:bg-blue-700 transition-all"
           >
-            Crear Cuenta
+            {loading ? "Creando cuenta..." : "Registrar"}
           </button>
         </form>
 
         <p className="text-center text-sm text-gray-600 mt-4">
-          ¿Ya tienes una cuenta?{" "}
-          <a className="text-blue-600 font-semibold hover:underline" href="/login">
+          ¿Ya tienes cuenta?{" "}
+          <a href="/login" className="text-blue-600 font-semibold hover:underline">
             Inicia sesión aquí
           </a>
         </p>
