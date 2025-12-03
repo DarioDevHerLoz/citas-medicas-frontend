@@ -1,50 +1,200 @@
-import React, { useState, useEffect } from "react";
+// src/views/DasboardPacientePage.tsx
+import React, { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import jsPDF from "jspdf";
-import FullCalendar from "@fullcalendar/react";
+import FullCalendar, {
+  EventInput,
+  EventApi,
+  DateSelectArg,
+} from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import interactionPlugin from "@fullcalendar/interaction";
 
-interface Cita {
-  id: number;
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5005";
+
+type Cita = {
+  id: string;
+  titulo: string;
   fecha: string;
   hora: string;
   medico: string;
-  estado: "pendiente" | "completada";
+  paciente: string;
+  notas?: string;
+  estado: "pendiente" | "completada" | "cancelada" | string;
+  resultado?: string; // NUEVO: resultado escrito por el médico
+};
+
+type Medico = {
+  id: string;
+  nombre: string;
+  apaterno: string;
+  correo: string;
+};
+
+function getToken() {
+  return localStorage.getItem("token");
+}
+
+function getPayload() {
+  const token = getToken();
+  if (!token) return null;
+  try {
+    const [, payloadBase64] = token.split(".");
+    return JSON.parse(atob(payloadBase64));
+  } catch {
+    return null;
+  }
 }
 
 export default function PacienteDashboard() {
-  const [citas, setCitas] = useState<Cita[]>([
-    {
-      id: 1,
-      fecha: "2025-11-30",
-      hora: "10:00",
-      medico: "Dr. Pérez",
-      estado: "pendiente",
-    },
-  ]);
+  const navigate = useNavigate();
+  const payload = getPayload();
 
+  const [citas, setCitas] = useState<Cita[]>([]);
+  const [medicos, setMedicos] = useState<Medico[]>([]);
   const [isOpen, setIsOpen] = useState(false);
-  const [newFecha, setNewFecha] = useState("");
-  const [newHora, setNewHora] = useState("");
+  const [editing, setEditing] = useState<Cita | null>(null);
 
-  // 🔒 BLOQUEAR SCROLL CUANDO EL MODAL ESTÁ ABIERTO
+  const eventos: EventInput[] = useMemo(
+    () =>
+      citas.map((cita) => ({
+        id: cita.id,
+        title: `${cita.titulo}`,
+        start: new Date(`${cita.fecha}T${cita.hora}:00`).toISOString(),
+        backgroundColor:
+          cita.estado === "completada" ? "#22c55e" : "#3b82f6",
+        borderColor: cita.estado === "completada" ? "#16a34a" : "#1d4ed8",
+        extendedProps: { ...cita },
+      })),
+    [citas]
+  );
+
   useEffect(() => {
-    if (isOpen) {
-      document.body.style.overflow = "hidden";
-    } else {
+    if (!payload) return;
+    document.body.style.overflow = isOpen ? "hidden" : "auto";
+    return () => {
       document.body.style.overflow = "auto";
-    }
-  }, [isOpen]);
+    };
+  }, [isOpen, payload]);
 
-  // Convertir a eventos de FullCalendar
-  const eventos = citas.map((cita) => ({
-    id: cita.id.toString(),
-    title: `${cita.medico} (${cita.hora})`,
-    date: cita.fecha,
-    backgroundColor: cita.estado === "completada" ? "#22c55e" : "#3b82f6",
-    borderColor: cita.estado === "completada" ? "#16a34a" : "#1d4ed8",
-  }));
+  useEffect(() => {
+    if (!payload) return;
+    cargarDatos();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function cargarDatos() {
+    if (!payload) return;
+    try {
+      const token = getToken();
+      const headers: HeadersInit = token
+        ? { Authorization: `Bearer ${token}` }
+        : {};
+
+      const [citasRes, medicosRes] = await Promise.all([
+        fetch(`${API_URL}/api/citas/paciente/${payload.id}`, { headers }),
+        fetch(`${API_URL}/api/usuarios/medicos`, { headers }),
+      ]);
+      const citasData = await citasRes.json();
+      const medicosData = await medicosRes.json();
+
+      setCitas(Array.isArray(citasData) ? citasData : []);
+      setMedicos(Array.isArray(medicosData) ? medicosData : []);
+    } catch (e) {
+      console.error("Error cargando datos", e);
+    }
+  }
+
+  function abrirNuevaCita(selectInfo?: DateSelectArg) {
+    const start = selectInfo ? selectInfo.startStr : new Date().toISOString();
+    const fecha = start.slice(0, 10);
+    const hora = start.slice(11, 16);
+
+    setEditing({
+      id: "",
+      titulo: "",
+      fecha,
+      hora,
+      medico: "",
+      paciente: payload?.id || "",
+      notas: "",
+      estado: "pendiente",
+      resultado: "",
+    });
+    setIsOpen(true);
+  }
+
+  function abrirEditarCita(event: EventApi) {
+    const ext = event.extendedProps as any;
+    setEditing({
+      id: event.id,
+      titulo: ext.titulo || event.title,
+      fecha: ext.fecha,
+      hora: ext.hora,
+      medico: ext.medico,
+      paciente: ext.paciente,
+      notas: ext.notas || "",
+      estado: ext.estado || "pendiente",
+      resultado: ext.resultado || "",
+    });
+    setIsOpen(true);
+  }
+
+  async function guardarCita() {
+    if (!editing || !payload) return;
+    const token = getToken();
+    const method = editing.id ? "PUT" : "POST";
+    const url =
+      method === "POST"
+        ? `${API_URL}/api/citas`
+        : `${API_URL}/api/citas/${editing.id}`;
+
+    const res = await fetch(url, {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({
+        titulo: editing.titulo,
+        fecha: editing.fecha,
+        hora: editing.hora,
+        medico: editing.medico,
+        paciente: payload.id,
+        notas: editing.notas,
+        estado: editing.estado,
+        // el paciente NO debe modificar el resultado
+      }),
+    });
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert(data.error || "Error al guardar la cita");
+      return;
+    }
+
+    await cargarDatos();
+    setIsOpen(false);
+    setEditing(null);
+  }
+
+  async function eliminarCita(id: string) {
+    if (!confirm("¿Eliminar esta cita?")) return;
+    const token = getToken();
+    const res = await fetch(`${API_URL}/api/citas/${id}`, {
+      method: "DELETE",
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert(data.error || "Error al eliminar la cita");
+      return;
+    }
+    await cargarDatos();
+  }
 
   const generarPDF = () => {
     const pdf = new jsPDF();
@@ -52,91 +202,225 @@ export default function PacienteDashboard() {
 
     citas.forEach((cita, index) => {
       pdf.text(
-        `${index + 1}. Fecha: ${cita.fecha} - Hora: ${cita.hora} - Médico: ${
-          cita.medico
-        } - Estado: ${cita.estado}`,
+        `${index + 1}. ${cita.fecha} ${cita.hora} - ${cita.titulo} - ${cita.estado}`,
         10,
-        20 + index * 10
+        20 + index * 8
       );
     });
 
     pdf.save("mis_citas.pdf");
   };
 
-  const agendarCita = () => {
-    const nueva = {
-      id: citas.length + 1,
-      fecha: newFecha,
-      hora: newHora,
-      medico: "Dr. Asignado",
-      estado: "pendiente",
-    };
-    setCitas([...citas, nueva]);
-    setIsOpen(false);
-  };
+  async function handleLogout() {
+    const token = getToken();
+    try {
+      if (token) {
+        await fetch(`${API_URL}/api/auth/logout`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+        });
+      }
+    } catch (e) {
+      console.error("Error cerrando sesión", e);
+    } finally {
+      localStorage.removeItem("token");
+      navigate("/login");
+    }
+  }
+
+  const nombrePaciente = payload?.nombre || "Paciente";
 
   return (
-    <div className="p-6">
-      <h1 className="text-3xl font-bold mb-6">Mis Citas</h1>
-
-      {/* Botones */}
-      <div className="flex gap-4 mb-4">
+    <div className="min-h-screen bg-sky-50">
+      <header className="flex items-center justify-between px-6 py-4 bg-white shadow-sm">
+        <div>
+          <h1 className="text-xl font-bold text-blue-700">Mis citas</h1>
+          <p className="text-xs text-gray-500">
+            Hola, {nombrePaciente}. Administra tus citas médicas.
+          </p>
+        </div>
         <button
-          onClick={() => setIsOpen(true)}
-          className="bg-blue-600 text-white px-4 py-2 rounded"
+          onClick={handleLogout}
+          className="text-sm px-3 py-2 rounded bg-red-500 text-white hover:bg-red-600"
         >
-          Agendar Cita
+          Cerrar sesión
         </button>
+      </header>
 
-        <button
-          onClick={generarPDF}
-          className="bg-red-600 text-white px-4 py-2 rounded"
-        >
-          Exportar PDF
-        </button>
-      </div>
+      <main className="p-6 space-y-4">
+        <div className="flex flex-wrap gap-4 mb-4">
+          <button
+            onClick={() => abrirNuevaCita()}
+            className="bg-blue-600 text-white px-4 py-2 rounded shadow hover:bg-blue-700"
+          >
+            Agendar cita
+          </button>
 
-      {/* Calendario */}
-      <div className="bg-white shadow p-4 rounded">
-        <FullCalendar
-          plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
-          initialView="dayGridMonth"
-          height="700px"
-          events={eventos}
-        />
-      </div>
+          <button
+            onClick={generarPDF}
+            className="bg-emerald-600 text-white px-4 py-2 rounded shadow hover:bg-emerald-700"
+          >
+            Exportar PDF
+          </button>
+        </div>
 
-      {/* Modal */}
-      {isOpen && (
+        <div className="bg-white shadow p-4 rounded">
+          <FullCalendar
+            plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
+            initialView="dayGridMonth"
+            height="700px"
+            selectable
+            editable={false} // el paciente no arrastra, solo crea/edita por modal
+            headerToolbar={{
+              left: "prev,next today",
+              center: "title",
+              right: "dayGridMonth,timeGridWeek,timeGridDay",
+            }}
+            events={eventos}
+            select={(info) => abrirNuevaCita(info)}
+            eventClick={(arg) => abrirEditarCita(arg.event)}
+          />
+        </div>
+
+        <section className="mt-6 bg-white rounded shadow p-4">
+          <h2 className="text-sm font-semibold mb-2 text-gray-700">
+            Mis citas (lista)
+          </h2>
+          <ul className="space-y-2 text-xs">
+            {citas.map((c) => (
+              <li
+                key={c.id}
+                className="flex items-center justify-between border-b last:border-b-0 pb-1"
+              >
+                <div>
+                  <p className="font-medium">{c.titulo}</p>
+                  <p className="text-gray-500">
+                    {c.fecha} {c.hora} - {c.estado}
+                  </p>
+                  {c.resultado && (
+                    <p className="text-[11px] text-emerald-700 mt-1">
+                      Resultado: {c.resultado}
+                    </p>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    className="px-2 py-1 rounded border text-blue-600"
+                    onClick={() => {
+                      setEditing(c);
+                      setIsOpen(true);
+                    }}
+                  >
+                    Editar
+                  </button>
+                  <button
+                    className="px-2 py-1 rounded border text-red-600"
+                    onClick={() => eliminarCita(c.id)}
+                  >
+                    Eliminar
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      </main>
+
+      {isOpen && editing && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[9999]">
           <div className="bg-white p-6 rounded shadow-lg w-96 z-[10000]">
-            <h2 className="text-xl font-bold mb-4">Agendar Nueva Cita</h2>
+            <h2 className="text-xl font-bold mb-4">
+              {editing.id ? "Editar cita" : "Agendar nueva cita"}
+            </h2>
 
+            <label className="block text-sm mb-1">Título / Motivo</label>
+            <input
+              type="text"
+              className="border p-2 w-full mb-3"
+              value={editing.titulo}
+              onChange={(e) =>
+                setEditing({ ...editing, titulo: e.target.value })
+              }
+            />
+
+            <label className="block text-sm mb-1">Médico</label>
+            <select
+              className="border p-2 w-full mb-3"
+              value={editing.medico}
+              onChange={(e) =>
+                setEditing({ ...editing, medico: e.target.value })
+              }
+            >
+              <option value="">Seleccione médico</option>
+              {medicos.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.nombre} {m.apaterno}
+                </option>
+              ))}
+            </select>
+
+            <label className="block text-sm mb-1">Fecha</label>
             <input
               type="date"
               className="border p-2 w-full mb-3"
-              onChange={(e) => setNewFecha(e.target.value)}
+              value={editing.fecha}
+              onChange={(e) =>
+                setEditing({ ...editing, fecha: e.target.value })
+              }
             />
 
+            <label className="block text-sm mb-1">Hora</label>
             <input
               type="time"
               className="border p-2 w-full mb-3"
-              onChange={(e) => setNewHora(e.target.value)}
+              value={editing.hora}
+              onChange={(e) =>
+                setEditing({ ...editing, hora: e.target.value })
+              }
             />
 
-            <button
-              onClick={agendarCita}
-              className="bg-green-600 text-white w-full py-2 rounded"
-            >
-              Guardar
-            </button>
+            <label className="block text-sm mb-1">Notas</label>
+            <textarea
+              className="border p-2 w-full mb-3 h-20"
+              value={editing.notas || ""}
+              onChange={(e) =>
+                setEditing({ ...editing, notas: e.target.value })
+              }
+            />
 
-            <button
-              onClick={() => setIsOpen(false)}
-              className="mt-2 w-full py-2 rounded border"
-            >
-              Cancelar
-            </button>
+            {editing.id && editing.resultado && (
+              <div className="mb-3">
+                <label className="block text-sm mb-1">
+                  Resultado de la cita (solo lectura)
+                </label>
+                <textarea
+                  className="border p-2 w-full h-20 bg-gray-50 text-xs"
+                  value={editing.resultado}
+                  readOnly
+                />
+              </div>
+            )}
+
+            <div className="flex gap-2 mb-2">
+              <button
+                onClick={guardarCita}
+                className="bg-green-600 text-white w-full py-2 rounded"
+              >
+                Guardar
+              </button>
+              <button
+                onClick={() => {
+                  setIsOpen(false);
+                  setEditing(null);
+                }}
+                className="w-full py-2 rounded border"
+              >
+                Cancelar
+              </button>
+            </div>
           </div>
         </div>
       )}

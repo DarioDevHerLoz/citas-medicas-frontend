@@ -1,9 +1,13 @@
+// src/interface/Cita.ts
 export interface Cita {
   id: string;
-  medicoId: string;
-  pacienteId: string;
-  fechaHoraInicio: string;
-  fechaHoraFin: string;
-  motivo: string;
-  estado: 'Pendiente' | 'Confirmada' | 'Cancelada';
+  titulo: string;
+  fecha: string;
+  hora: string;
+  paciente: string;
+  medico: string;
+  notas?: string;
+  estado: "pendiente" | "completada" | "cancelada";
+  resultado?: string; // ← NUEVO CAMPO
+  createdAt?: string;
 }

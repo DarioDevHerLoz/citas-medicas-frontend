@@ -1,129 +1,322 @@
-import React, { useEffect, useState } from "react";
-import FullCalendar from "@fullcalendar/react";
+// src/views/DashboardDoctorPage.tsx
+import React, { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import FullCalendar, { EventInput } from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
+import timeGridPlugin from "@fullcalendar/timegrid";
 import interactionPlugin from "@fullcalendar/interaction";
 
-interface Cita {
-  id: number;
-  title: string;
-  date: string;
-  estado: "pendiente" | "completada";
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5005";
+
+type Cita = {
+  id: string;
+  titulo: string;
+  fecha: string;
+  hora: string;
+  paciente: string;
+  medico: string;
+  notas?: string;
+  estado: "pendiente" | "completada" | "cancelada" | string;
+  resultado?: string; // NUEVO
+};
+
+type Paciente = {
+  id: string;
+  nombre: string;
+  apaterno: string;
+};
+
+function getToken() {
+  return localStorage.getItem("token");
+}
+
+function getPayload() {
+  const token = getToken();
+  if (!token) return null;
+  try {
+    const [, payloadBase64] = token.split(".");
+    return JSON.parse(atob(payloadBase64));
+  } catch {
+    return null;
+  }
 }
 
 export default function MedicoDashboard() {
-  const [citas, setCitas] = useState<Cita[]>([
-    { id: 1, title: "Paciente Juan", date: "2025-11-30", estado: "pendiente" },
-    { id: 2, title: "Paciente María", date: "2025-12-02", estado: "completada" },
-  ]);
+  const navigate = useNavigate();
+  const payload = getPayload();
 
+  const [citas, setCitas] = useState<Cita[]>([]);
+  const [pacientes, setPacientes] = useState<Paciente[]>([]);
   const [selected, setSelected] = useState<Cita | null>(null);
 
-  // bloquear scroll cuando el modal está abierto
   useEffect(() => {
     document.body.style.overflow = selected ? "hidden" : "auto";
-
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setSelected(null);
-    };
-    window.addEventListener("keydown", onKey);
     return () => {
-      window.removeEventListener("keydown", onKey);
       document.body.style.overflow = "auto";
     };
   }, [selected]);
 
-  const marcar = (estado: "pendiente" | "completada") => {
-    if (!selected) return;
-    setCitas((prev) => prev.map((c) => (c.id === selected.id ? { ...c, estado } : c)));
-    setSelected(null);
-  };
+  useEffect(() => {
+    if (!payload) return;
+    cargarDatos();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // pasar citas a eventos con color por estado
-  const eventos = citas.map((c) => ({
-    id: c.id.toString(),
-    title: c.title,
-    date: c.date,
-    backgroundColor: c.estado === "completada" ? "#16a34a" : "#2563eb", // verde / azul
-    borderColor: c.estado === "completada" ? "#15803d" : "#1e40af",
-    textColor: "#ffffff",
-  }));
+  async function cargarDatos() {
+    if (!payload) return;
+    try {
+      const token = getToken();
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
+      const [citasRes, pacientesRes] = await Promise.all([
+        fetch(`${API_URL}/api/citas/medico/${payload.id}`, { headers }),
+        fetch(`${API_URL}/api/usuarios/pacientes`, { headers }),
+      ]);
+
+      const citasData = await citasRes.json();
+      const pacientesData = await pacientesRes.json();
+
+      setCitas(Array.isArray(citasData) ? citasData : []);
+      setPacientes(Array.isArray(pacientesData) ? pacientesData : []);
+    } catch (e) {
+      console.error("Error cargando datos médico", e);
+    }
+  }
+
+  function getNombrePaciente(id: string) {
+    const p = pacientes.find((x) => x.id === id);
+    if (!p) return id;
+    return `${p.nombre} ${p.apaterno}`;
+  }
+
+  const eventos: EventInput[] = useMemo(
+    () =>
+      citas.map((c) => ({
+        id: c.id,
+        title: `${c.titulo} - ${getNombrePaciente(c.paciente)}`,
+        start: new Date(`${c.fecha}T${c.hora}:00`).toISOString(),
+        backgroundColor: c.estado === "completada" ? "#16a34a" : "#2563eb",
+        borderColor: c.estado === "completada" ? "#15803d" : "#1e40af",
+        textColor: "#ffffff",
+        extendedProps: { ...c },
+      })),
+    [citas, pacientes]
+  );
+
+  async function marcar(estado: "pendiente" | "completada" | "cancelada") {
+    if (!selected) return;
+    const token = getToken();
+    const res = await fetch(`${API_URL}/api/citas/${selected.id}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({
+        estado,
+        resultado: selected.resultado || "",
+      }),
+    });
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert(data.error || "Error al actualizar cita");
+      return;
+    }
+
+    await cargarDatos();
+    setSelected(null);
+  }
+
+  function formatearFechaHora(date: Date) {
+    const iso = date.toISOString();
+    const fecha = iso.slice(0, 10);
+    const hora = iso.slice(11, 16);
+    return { fecha, hora };
+  }
+
+  async function moverCita(info: any) {
+    const { event, revert } = info;
+    const token = getToken();
+
+    if (!event.start) {
+      revert();
+      return;
+    }
+
+    const { fecha, hora } = formatearFechaHora(event.start);
+
+    const res = await fetch(`${API_URL}/api/citas/${event.id}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ fecha, hora }),
+    });
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert(data.error || "Error al mover la cita");
+      revert();
+      return;
+    }
+
+    await cargarDatos();
+  }
+
+  async function handleLogout() {
+    const token = getToken();
+    try {
+      if (token) {
+        await fetch(`${API_URL}/api/auth/logout`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+        });
+      }
+    } catch (e) {
+      console.error("Error cerrando sesión", e);
+    } finally {
+      localStorage.removeItem("token");
+      navigate("/login");
+    }
+  }
+
+  const nombreMedico = payload?.nombre || "Médico";
 
   return (
-    <div className="p-6">
-      <h1 className="text-3xl font-semibold mb-6 text-gray-800">Citas del Médico</h1>
-
-      <div className="bg-white rounded-lg shadow-md p-4">
-        <FullCalendar
-          plugins={[dayGridPlugin, interactionPlugin]}
-          initialView="dayGridMonth"
-          headerToolbar={{
-            left: "prev,next today",
-            center: "title",
-            right: "dayGridMonth,timeGridWeek,timeGridDay",
-          }}
-          events={eventos}
-          eventClick={(info) => {
-            // evita comportamientos por defecto del calendario
-            info.jsEvent.preventDefault();
-            // buscar cita por id (FullCalendar devuelve string)
-            const id = Number(info.event.id);
-            const cita = citas.find((c) => c.id === id) || null;
-            setSelected(cita);
-          }}
-          height="650px"
-          // estilos para mejorar la apariencia
-          dayMaxEventRows={4}
-        />
-      </div>
-
-      {/* Modal */}
-      {selected && (
-        <div
-          className="fixed inset-0 z-[9999] flex items-center justify-center"
-          aria-modal="true"
-          role="dialog"
+    <div className="min-h-screen bg-sky-50">
+      <header className="flex items-center justify-between px-6 py-4 bg-white shadow-sm">
+        <div>
+          <h1 className="text-xl font-bold text-blue-700">Citas del médico</h1>
+          <p className="text-xs text-gray-500">
+            Hola, {nombreMedico}. Aquí puedes gestionar tus citas.
+          </p>
+        </div>
+        <button
+          onClick={handleLogout}
+          className="text-sm px-3 py-2 rounded bg-red-500 text-white hover:bg-red-600"
         >
-          {/* backdrop */}
-          <div
-            className="absolute inset-0 bg-black/50 backdrop-blur-sm transition-opacity"
-            onClick={() => setSelected(null)}
+          Cerrar sesión
+        </button>
+      </header>
+
+      <main className="p-6">
+        <div className="bg-white rounded-lg shadow-md p-4">
+          <FullCalendar
+            plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
+            initialView="dayGridMonth"
+            headerToolbar={{
+              left: "prev,next today",
+              center: "title",
+              right: "dayGridMonth,timeGridWeek,timeGridDay",
+            }}
+            events={eventos}
+            selectable={false} // OPCIÓN 2: solo edición mediante clic
+            editable={true}   // el doctor PUEDE mover sus citas
+            eventClick={(info) => {
+              info.jsEvent.preventDefault();
+              const ext = info.event.extendedProps as any;
+              setSelected({
+                id: info.event.id,
+                titulo: ext.titulo || info.event.title,
+                fecha: ext.fecha,
+                hora: ext.hora,
+                paciente: ext.paciente,
+                medico: ext.medico,
+                notas: ext.notas,
+                estado: ext.estado,
+                resultado: ext.resultado || "",
+              });
+            }}
+            eventDrop={moverCita}
+            eventResize={moverCita}
+            height="650px"
+            dayMaxEventRows={4}
           />
+        </div>
 
-          {/* card */}
+        {/* Modal de detalle / resultado */}
+        {selected && (
           <div
-            className="relative bg-white w-full max-w-md mx-4 rounded-2xl shadow-2xl p-6 z-[10000] transform transition-all duration-200 ease-out
-                       animate-[fadeIn_200ms_ease] motion-reduce:animate-none"
-            onClick={(e) => e.stopPropagation()}
-            style={{ animation: "scaleIn .18s ease-out" }}
+            className="fixed inset-0 z-[9999] flex items-center justify-center"
+            aria-modal="true"
+            role="dialog"
           >
-            <header className="flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-xl font-bold text-gray-800">{selected.title}</h2>
-                <p className="text-sm text-gray-500 mt-1">{selected.date}</p>
-              </div>
+            <div
+              className="absolute inset-0 bg-black/50 backdrop-blur-sm transition-opacity"
+              onClick={() => setSelected(null)}
+            />
 
-              <button
-                onClick={() => setSelected(null)}
-                className="text-gray-400 hover:text-gray-600 rounded p-1"
-                aria-label="Cerrar"
-              >
-                ✕
-              </button>
-            </header>
+            <div
+              className="relative bg-white w-full max-w-md mx-4 rounded-2xl shadow-2xl p-6 z-[10000] transform transition-all duration-200 ease-out"
+              onClick={(e) => e.stopPropagation()}
+              style={{ animation: "scaleIn .18s ease-out" }}
+            >
+              <header className="flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-xl font-bold text-gray-800">
+                    {selected.titulo}
+                  </h2>
+                  <p className="text-sm text-gray-500 mt-1">
+                    {selected.fecha} {selected.hora}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Paciente: {getNombrePaciente(selected.paciente)}
+                  </p>
+                </div>
 
-            <section className="mt-4">
-              <p className="text-sm text-gray-600">
-                Estado actual:{" "}
-                <span
-                  className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${
-                    selected.estado === "completada" ? "bg-green-100 text-green-800" : "bg-blue-100 text-blue-800"
-                  }`}
+                <button
+                  onClick={() => setSelected(null)}
+                  className="text-gray-400 hover:text-gray-600 rounded p-1"
+                  aria-label="Cerrar"
                 >
-                  {selected.estado}
-                </span>
-              </p>
+                  ✕
+                </button>
+              </header>
 
-              {/* acciones */}
+              <section className="mt-4 space-y-2 text-sm">
+                <p className="text-gray-600">
+                  Estado actual:{" "}
+                  <span
+                    className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${
+                      selected.estado === "completada"
+                        ? "bg-green-100 text-green-800"
+                        : selected.estado === "cancelada"
+                        ? "bg-red-100 text-red-700"
+                        : "bg-blue-100 text-blue-800"
+                    }`}
+                  >
+                    {selected.estado}
+                  </span>
+                </p>
+                {selected.notas && (
+                  <p className="text-gray-600">
+                    Notas:{" "}
+                    <span className="text-gray-800">{selected.notas}</span>
+                  </p>
+                )}
+                <div className="mt-3">
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">
+                    Resultado / resumen de la cita
+                  </label>
+                  <textarea
+                    className="w-full border rounded-lg px-3 py-2 text-xs min-h-[90px]"
+                    value={selected.resultado || ""}
+                    onChange={(e) =>
+                      setSelected({
+                        ...selected,
+                        resultado: e.target.value,
+                      })
+                    }
+                    placeholder="Escribe aquí el resumen clínico, indicaciones, etc."
+                  />
+                </div>
+              </section>
+
               <div className="mt-6 grid grid-cols-1 gap-3">
                 <button
                   onClick={() => marcar("completada")}
@@ -133,10 +326,17 @@ export default function MedicoDashboard() {
                 </button>
 
                 <button
-                  onClick={() => marcar("pendiente")}
+                  onClick={() => marcar("cancelada")}
                   className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-yellow-500 hover:bg-yellow-600 text-white py-2 px-3 transition"
                 >
-                  Marcar como pendiente
+                  Marcar como no asistió
+                </button>
+
+                <button
+                  onClick={() => marcar("pendiente")}
+                  className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-blue-500 hover:bg-blue-600 text-white py-2 px-3 transition"
+                >
+                  Volver a pendiente
                 </button>
 
                 <button
@@ -146,18 +346,17 @@ export default function MedicoDashboard() {
                   Cerrar
                 </button>
               </div>
-            </section>
-          </div>
-        </div>
-      )}
 
-      {/* animación CSS mínima (inlined para compatibilidad) */}
-      <style>{`
-        @keyframes scaleIn {
-          0% { opacity: 0; transform: translateY(6px) scale(.98); }
-          100% { opacity: 1; transform: translateY(0) scale(1); }
-        }
-      `}</style>
+              <style>{`
+                @keyframes scaleIn {
+                  0% { opacity: 0; transform: translateY(6px) scale(.98); }
+                  100% { opacity: 1; transform: translateY(0) scale(1); }
+                }
+              `}</style>
+            </div>
+          </div>
+        )}
+      </main>
     </div>
   );
 }

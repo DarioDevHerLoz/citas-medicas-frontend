@@ -1,6 +1,9 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
+// Base de la API: viene de VITE_API_URL o usa localhost por defecto
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5005";
+
 export default function RegisterPage() {
   const navigate = useNavigate();
 
@@ -36,7 +39,7 @@ export default function RegisterPage() {
     setError("");
 
     try {
-      const res = await fetch("http://localhost:5005/api/auth/register", {
+      const res = await fetch(`${API_URL}/api/auth/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
@@ -57,7 +60,8 @@ export default function RegisterPage() {
       navigate("/login");
 
     } catch (err) {
-      setError("Error de conexión con el servidor", err);
+      console.error(err);
+      setError("Error de conexión con el servidor");
     }
 
     setLoading(false);
@@ -65,7 +69,6 @@ export default function RegisterPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-100 to-blue-300 p-4">
-
       <div className="w-full max-w-lg bg-white rounded-2xl shadow-xl p-8">
         <h1 className="text-3xl font-bold text-center text-blue-700 mb-6">
           Crear Cuenta
@@ -76,7 +79,6 @@ export default function RegisterPage() {
         )}
 
         <form className="space-y-5" onSubmit={handleSubmit}>
-
           {/* INPUTS DINÁMICOS */}
           {[
             { label: "Nombre", name: "nombre" },

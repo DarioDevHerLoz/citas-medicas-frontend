@@ -1,5 +1,19 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+
+// Base de la API: viene de VITE_API_URL o usa localhost por defecto
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5005";
+
+function getPayload() {
+  const token = localStorage.getItem("token");
+  if (!token) return null;
+  try {
+    const [, payloadBase64] = token.split(".");
+    return JSON.parse(atob(payloadBase64));
+  } catch {
+    return null;
+  }
+}
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -8,12 +22,22 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
 
+  // Si ya hay sesión, redirigir
+  useEffect(() => {
+    const payload = getPayload();
+    if (!payload) return;
+
+    if (payload.rol === "admin") navigate("/admin/dashboard", { replace: true });
+    else if (payload.rol === "paciente") navigate("/paciente", { replace: true });
+    else if (payload.rol === "medico") navigate("/medico", { replace: true });
+  }, [navigate]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg("");
 
     try {
-      const res = await fetch("http://localhost:5005/api/auth/login", {
+      const res = await fetch(`${API_URL}/api/auth/login`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -32,9 +56,8 @@ export default function LoginPage() {
       localStorage.setItem("token", data.token);
 
       // Decodificar payload del JWT
-      const payloadBase64 = data.token.split(".")[1];
+      const [, payloadBase64] = data.token.split(".");
       const payload = JSON.parse(atob(payloadBase64));
-
       const rol = payload.rol;
 
       // Redirección según rol
